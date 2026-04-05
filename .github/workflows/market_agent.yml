@@ -1,0 +1,103 @@
+name: 🇲🇽 멕시코 마켓 인텔리전스 에이전트 (매일 KST 09:00)
+
+on:
+  # ── 자동 실행 스케줄 ──────────────────────────────────────
+  # cron은 UTC 기준 → KST 09:00 = UTC 00:00
+  schedule:
+    - cron: "0 0 * * *"   # 매일 UTC 00:00 (= KST 09:00)
+
+  # ── 수동 실행 (테스트용) ───────────────────────────────────
+  # GitHub Actions 탭 → "Run workflow" 버튼으로 즉시 실행 가능
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: "수동 실행 이유"
+        required: false
+        default: "테스트 실행"
+
+jobs:
+  run-market-agent:
+    name: 마켓 인텔리전스 데이터 수집 및 리포트 발송
+    runs-on: ubuntu-latest
+    timeout-minutes: 30   # 최대 30분 실행 (Apify 호출 포함)
+
+    steps:
+      # ── 1. 소스코드 체크아웃 ─────────────────────────────
+      - name: 📥 코드 체크아웃
+        uses: actions/checkout@v4
+
+      # ── 2. Python 환경 설정 ──────────────────────────────
+      - name: 🐍 Python 3.11 설정
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"   # pip 캐시로 설치 속도 향상
+
+      # ── 3. 의존성 설치 ───────────────────────────────────
+      - name: 📦 라이브러리 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # ── 4. 환경 변수 설정 (GitHub Secrets에서 주입) ──────
+      # 설정 방법: GitHub 레포 → Settings → Secrets and variables
+      #           → Actions → New repository secret
+      - name: 🔑 환경 변수 설정
+        env:
+          # Reddit API
+          REDDIT_CLIENT_ID: ${{ secrets.REDDIT_CLIENT_ID }}
+          REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
+          REDDIT_USER_AGENT: ${{ secrets.REDDIT_USER_AGENT }}
+          # Apify
+          APIFY_API_TOKEN: ${{ secrets.APIFY_API_TOKEN }}
+          # AI 분석
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          AI_PROVIDER: ${{ vars.AI_PROVIDER || 'anthropic' }}
+          # Gmail
+          GMAIL_SENDER: ${{ secrets.GMAIL_SENDER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          GMAIL_RECIPIENT: ${{ secrets.GMAIL_RECIPIENT }}
+          # 에이전트 설정
+          LOOKBACK_DAYS: "1"
+        run: echo "환경 변수 설정 완료"
+
+      # ── 5. 에이전트 실행 ─────────────────────────────────
+      - name: 🚀 마켓 인텔리전스 에이전트 실행
+        env:
+          REDDIT_CLIENT_ID: ${{ secrets.REDDIT_CLIENT_ID }}
+          REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
+          REDDIT_USER_AGENT: ${{ secrets.REDDIT_USER_AGENT }}
+          APIFY_API_TOKEN: ${{ secrets.APIFY_API_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          AI_PROVIDER: anthropic
+          GMAIL_SENDER: ${{ secrets.GMAIL_SENDER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          GMAIL_RECIPIENT: ${{ secrets.GMAIL_RECIPIENT }}
+          LOOKBACK_DAYS: "1"
+        run: python agent.py
+
+      # ── 6. 생성된 HTML/JSON을 GitHub에 자동 푸시 ────────
+      # 이 단계가 실행되면 GitHub Pages URL이 자동으로 업데이트됩니다.
+      - name: 🌐 GitHub Pages 업데이트 (docs 폴더 푸시)
+        run: |
+          git config --global user.name "Market Agent Bot"
+          git config --global user.email "actions@github.com"
+          git add docs/
+          git diff --staged --quiet || git commit -m "📊 리포트 업데이트: $(date +'%Y-%m-%d')"
+          git push
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # ── 7. 생성된 리포트 아티팩트로 저장 ────────────────      # Actions 탭에서 리포트 파일을 다운로드할 수 있습니다.
+      - name: 📄 리포트 아티팩트 업로드
+        if: always()   # 에러가 나도 수집된 파일 업로드
+        uses: actions/upload-artifact@v4
+        with:
+          name: market-report-${{ github.run_number }}
+          path: |
+            report_*.md
+            debug_raw_*.json
+            agent.log
+          retention-days: 30   # 30일간 보관
