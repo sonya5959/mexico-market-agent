@@ -101,7 +101,7 @@ class Config:
     APIFY_MERCADOLIBRE_ACTOR = "trudax/mercadolibre-scraper"
     # Amazon Mexico 스크래퍼
     APIFY_AMAZON_ACTOR = "junglee/amazon-crawler"
-바꾸고 Commit changes 클릭! 😊
+
 
 
 "
