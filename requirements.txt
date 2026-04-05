@@ -1,0 +1,30 @@
+# ============================================================
+# 멕시코 가전 마켓 인텔리전스 에이전트 - 필수 라이브러리
+# ============================================================
+
+# RSS 피드 파싱
+feedparser==6.0.11
+
+# Reddit API 클라이언트
+praw==7.7.1
+
+# HTTP 요청 (Apify, Slack, Telegram)
+requests==2.31.0
+
+# Anthropic Claude API
+anthropic==0.25.0
+
+# OpenAI API (대체 옵션)
+openai==1.30.0
+
+# 환경 변수 관리
+python-dotenv==1.0.1
+
+# HTML 파싱 (보조용)
+beautifulsoup4==4.12.3
+
+# 스케줄링 (로컬 테스트용)
+schedule==1.2.1
+
+# 날짜/시간 처리
+pytz==2024.1

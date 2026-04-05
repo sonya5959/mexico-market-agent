@@ -1,0 +1,26 @@
+# API 키 보호 (절대 Git에 올리지 말 것!)
+.env
+
+# 실행 로그
+*.log
+
+# 생성된 리포트 및 디버그 파일
+report_*.md
+debug_raw_*.json
+
+# Python 캐시
+__pycache__/
+*.pyc
+*.pyo
+.Python
+venv/
+.venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# macOS
+.DS_Store
