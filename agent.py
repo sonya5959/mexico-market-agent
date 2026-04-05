@@ -795,10 +795,259 @@ def send_notification(report: str) -> bool:
 # ⑥ 메인 워크플로우 (Main Orchestrator)
 # ══════════════════════════════════════════════════════════
 
+# ══════════════════════════════════════════════════════════
+# ⑥ GitHub Pages HTML 생성 (Page Builder)
+# ══════════════════════════════════════════════════════════
+
+def save_report_json(report: str, raw_data: dict) -> str:
+    """
+    날짜별 리포트를 JSON 파일로 저장합니다.
+    나중에 Claude와 경향성 분석할 때 이 파일들을 사용합니다.
+
+    저장 위치: docs/data/YYYY-MM-DD.json
+    """
+    os.makedirs("docs/data", exist_ok=True)
+    kst = pytz.timezone("Asia/Seoul")
+    today = datetime.now(kst).strftime("%Y-%m-%d")
+    filepath = f"docs/data/{today}.json"
+
+    payload = {
+        "date": today,
+        "report_korean": report,
+        "raw": {
+            "news_count": len(raw_data.get("news", [])),
+            "reddit_count": len(raw_data.get("reddit", [])),
+            "mercadolibre_count": len(raw_data.get("ecommerce", {}).get("mercadolibre", [])),
+            "amazon_count": len(raw_data.get("ecommerce", {}).get("amazon", [])),
+        },
+    }
+
+    with open(filepath, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+
+    logger.info(f"[JSON 저장] {filepath}")
+    return filepath
+
+
+def build_index_html() -> str:
+    """
+    docs/data/ 폴더의 JSON 파일들을 읽어서
+    GitHub Pages에서 보여줄 index.html을 생성합니다.
+
+    - 최신 리포트를 메인에 표시
+    - 과거 날짜 목록을 사이드바에 표시
+    - 날짜 클릭 시 해당 날짜 리포트로 전환
+    """
+    os.makedirs("docs/data", exist_ok=True)
+
+    # 저장된 JSON 파일 목록 읽기 (최신순 정렬)
+    data_files = sorted(
+        [f for f in os.listdir("docs/data") if f.endswith(".json")],
+        reverse=True,
+    )
+
+    reports = []
+    for fname in data_files:
+        try:
+            with open(f"docs/data/{fname}", encoding="utf-8") as f:
+                reports.append(json.load(f))
+        except Exception:
+            continue
+
+    if not reports:
+        latest_report_html = "<p>아직 수집된 리포트가 없습니다. 내일 다시 확인해주세요!</p>"
+        latest_date = "-"
+    else:
+        latest = reports[0]
+        latest_date = latest["date"]
+        latest_report_html = markdown_to_html(latest["report_korean"])
+
+    # 날짜 목록 사이드바 생성
+    history_items = ""
+    for r in reports:
+        date = r["date"]
+        raw = r.get("raw", {})
+        history_items += f"""
+        <div class="history-item" onclick="loadReport('{date}')" id="btn-{date}">
+            <div class="history-date">{date}</div>
+            <div class="history-meta">
+                뉴스 {raw.get('news_count', 0)}건 ·
+                Reddit {raw.get('reddit_count', 0)}건
+            </div>
+        </div>
+        """
+
+    # 모든 리포트 데이터를 JS에 넣기
+    reports_js = json.dumps(
+        {r["date"]: markdown_to_html(r["report_korean"]) for r in reports},
+        ensure_ascii=False,
+    )
+
+    kst = pytz.timezone("Asia/Seoul")
+    updated_at = datetime.now(kst).strftime("%Y-%m-%d %H:%M KST")
+
+    html = f"""<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>🇲🇽 멕시코 세탁기 마켓 인텔리전스</title>
+  <style>
+    * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+    body {{
+      font-family: 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
+      background: #f0f4f8;
+      color: #222;
+    }}
+
+    /* 상단 헤더 */
+    .header {{
+      background: linear-gradient(135deg, #003087, #0066cc);
+      color: white;
+      padding: 20px 32px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }}
+    .header h1 {{ font-size: 20px; }}
+    .header .updated {{ font-size: 12px; color: #cce0ff; margin-top: 4px; }}
+
+    /* 전체 레이아웃 */
+    .container {{
+      display: flex;
+      max-width: 1200px;
+      margin: 24px auto;
+      gap: 20px;
+      padding: 0 16px;
+    }}
+
+    /* 왼쪽 사이드바: 날짜 목록 */
+    .sidebar {{
+      width: 200px;
+      flex-shrink: 0;
+    }}
+    .sidebar h2 {{
+      font-size: 13px;
+      color: #666;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 10px;
+    }}
+    .history-item {{
+      background: white;
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin-bottom: 8px;
+      cursor: pointer;
+      border: 2px solid transparent;
+      transition: all 0.15s;
+    }}
+    .history-item:hover {{ border-color: #0066cc; }}
+    .history-item.active {{ border-color: #0066cc; background: #e8f0fe; }}
+    .history-date {{ font-size: 14px; font-weight: bold; color: #003087; }}
+    .history-meta {{ font-size: 11px; color: #888; margin-top: 2px; }}
+
+    /* 오른쪽 메인: 리포트 본문 */
+    .main {{
+      flex: 1;
+      background: white;
+      border-radius: 12px;
+      padding: 32px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+      min-height: 600px;
+    }}
+    .main h1 {{ color: #1a1a2e; border-bottom: 3px solid #0066cc; padding-bottom: 8px; margin-bottom: 16px; font-size: 22px; }}
+    .main h2 {{ color: #0066cc; margin-top: 28px; margin-bottom: 8px; font-size: 18px; }}
+    .main h3 {{ color: #333; margin-top: 16px; margin-bottom: 6px; font-size: 15px; }}
+    .main p {{ line-height: 1.7; margin: 6px 0; }}
+    .main ul {{ padding-left: 20px; margin: 8px 0; }}
+    .main li {{ line-height: 1.7; margin: 4px 0; }}
+    .main hr {{ border: none; border-top: 1px solid #eee; margin: 16px 0; }}
+    .main table {{ border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 14px; }}
+    .main th {{ background: #e8f0fe; border: 1px solid #ddd; padding: 8px 12px; text-align: left; }}
+    .main td {{ border: 1px solid #ddd; padding: 8px 12px; }}
+
+    /* 빈 상태 */
+    .empty {{ text-align: center; padding: 80px 20px; color: #888; }}
+    .empty div {{ font-size: 48px; margin-bottom: 16px; }}
+
+    @media (max-width: 640px) {{
+      .container {{ flex-direction: column; }}
+      .sidebar {{ width: 100%; }}
+    }}
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <div>
+    <h1>🇲🇽 멕시코 세탁기 마켓 인텔리전스</h1>
+    <div class="updated">마지막 업데이트: {updated_at} · 총 {len(reports)}일치 데이터 누적</div>
+  </div>
+</div>
+
+<div class="container">
+
+  <!-- 왼쪽: 날짜 목록 -->
+  <div class="sidebar">
+    <h2>📅 날짜별 리포트</h2>
+    {history_items if history_items else '<p style="color:#aaa;font-size:13px">아직 데이터 없음</p>'}
+  </div>
+
+  <!-- 오른쪽: 리포트 본문 -->
+  <div class="main" id="report-content">
+    {latest_report_html if reports else
+    '<div class="empty"><div>📭</div><p>아직 수집된 리포트가 없습니다.<br>에이전트가 첫 실행되면 여기에 표시됩니다.</p></div>'}
+  </div>
+
+</div>
+
+<script>
+  // 모든 리포트 데이터 (날짜 → HTML)
+  const allReports = {reports_js};
+  let currentDate = '{latest_date}';
+
+  // 페이지 로드 시 최신 날짜 버튼 활성화
+  if (currentDate !== '-') {{
+    const btn = document.getElementById('btn-' + currentDate);
+    if (btn) btn.classList.add('active');
+  }}
+
+  // 날짜 클릭 시 해당 리포트로 전환
+  function loadReport(date) {{
+    document.getElementById('report-content').innerHTML =
+      allReports[date] || '<p>리포트를 불러올 수 없습니다.</p>';
+
+    // 버튼 활성화 상태 업데이트
+    document.querySelectorAll('.history-item').forEach(el => el.classList.remove('active'));
+    const btn = document.getElementById('btn-' + date);
+    if (btn) btn.classList.add('active');
+
+    currentDate = date;
+    window.scrollTo(0, 0);
+  }}
+</script>
+
+</body>
+</html>"""
+
+    # docs/index.html 저장
+    os.makedirs("docs", exist_ok=True)
+    with open("docs/index.html", "w", encoding="utf-8") as f:
+        f.write(html)
+
+    logger.info(f"[GitHub Pages] docs/index.html 생성 완료 ({len(reports)}개 리포트)")
+    return "docs/index.html"
+
+
+# ══════════════════════════════════════════════════════════
+# ⑦ 메인 워크플로우 (Main Orchestrator)
+# ══════════════════════════════════════════════════════════
+
 def run_agent():
     """
     전체 에이전트 파이프라인을 실행합니다.
-    수집 → 전처리 → AI 분석 → 발송
+    수집 → 전처리 → AI 분석 → JSON 저장 → HTML 생성 → Gmail 발송
     """
     start_time = datetime.now()
     logger.info("=" * 60)
@@ -807,10 +1056,11 @@ def run_agent():
     logger.info("=" * 60)
 
     report = None
+    raw_data = {}
 
     try:
         # ── Step 1: 데이터 수집 ───────────────────────────
-        logger.info("\n📡 [Step 1/4] 데이터 수집 시작...")
+        logger.info("\n📡 [Step 1/5] 데이터 수집 시작...")
 
         news_data = collect_google_news(
             keywords=Config.NEWS_KEYWORDS,
@@ -825,46 +1075,41 @@ def run_agent():
 
         ecommerce_data = collect_ecommerce_via_apify(search_keyword="lavadora")
 
+        raw_data = {
+            "news": news_data,
+            "reddit": reddit_data,
+            "ecommerce": ecommerce_data,
+        }
+
         # ── Step 2: 데이터 전처리 ─────────────────────────
-        logger.info("\n🔧 [Step 2/4] 데이터 전처리 중...")
+        logger.info("\n🔧 [Step 2/5] 데이터 전처리 중...")
         raw_text = preprocess_data_for_ai(
             news=news_data,
             reddit=reddit_data,
             ecommerce=ecommerce_data,
         )
 
-        # (선택) 원본 데이터를 JSON으로 저장 (디버깅용)
-        debug_path = f"debug_raw_{datetime.now().strftime('%Y%m%d_%H%M')}.json"
-        with open(debug_path, "w", encoding="utf-8") as f:
-            json.dump(
-                {"news": news_data, "reddit": reddit_data, "ecommerce": ecommerce_data},
-                f, ensure_ascii=False, indent=2,
-            )
-        logger.info(f"   원본 데이터 저장: {debug_path}")
-
         # ── Step 3: AI 분석 ───────────────────────────────
-        logger.info(f"\n🤖 [Step 3/4] AI 분석 중 (Provider: {Config.AI_PROVIDER})...")
+        logger.info(f"\n🤖 [Step 3/5] AI 분석 중 (Provider: {Config.AI_PROVIDER})...")
         report = analyze_data(raw_text)
 
-        # 리포트를 파일로도 저장
-        report_path = f"report_{datetime.now().strftime('%Y%m%d')}.md"
-        with open(report_path, "w", encoding="utf-8") as f:
-            f.write(report)
-        logger.info(f"   리포트 저장: {report_path}")
+        # ── Step 4: JSON 저장 + HTML 생성 ─────────────────
+        logger.info("\n🌐 [Step 4/5] GitHub Pages 업데이트 중...")
+        save_report_json(report, raw_data)   # docs/data/날짜.json 저장
+        build_index_html()                    # docs/index.html 재생성
 
-        # ── Step 4: 알림 발송 ─────────────────────────────
-        logger.info(f"\n📨 [Step 4/4] 알림 발송 중 (Channel: {Config.NOTIFICATION_CHANNEL})...")
+        # ── Step 5: Gmail 발송 ────────────────────────────
+        logger.info("\n📨 [Step 5/5] Gmail 발송 중...")
         success = send_notification(report)
 
         if success:
-            logger.info("✅ 리포트 발송 완료!")
+            logger.info("✅ 모든 작업 완료! Gmail 발송 + GitHub Pages 업데이트")
         else:
-            logger.error("❌ 리포트 발송 실패! 로그를 확인하세요.")
+            logger.error("❌ Gmail 발송 실패! 로그를 확인하세요.")
 
     except Exception as e:
         logger.critical(f"🔥 에이전트 실행 중 치명적 오류 발생: {e}", exc_info=True)
 
-        # 오류 발생 시에도 이메일 알림 전송
         error_report = (
             f"# 🚨 멕시코 마켓 에이전트 오류 발생\n\n"
             f"**시간:** {datetime.now(pytz.timezone('Asia/Seoul')).strftime('%Y-%m-%d %H:%M KST')}\n\n"
